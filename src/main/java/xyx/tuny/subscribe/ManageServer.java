@@ -1,60 +1,71 @@
 package xyx.tuny.subscribe;
 
 import java.util.List;
-
-import org.I0Itec.zkclient.IZkChildListener;
-import org.I0Itec.zkclient.IZkDataListener;
-import org.I0Itec.zkclient.ZkClient;
-import org.I0Itec.zkclient.exception.ZkNoNodeException;
-import org.I0Itec.zkclient.exception.ZkNodeExistsException;
-
+import org.apache.curator.framework.recipes.cache.*;
+import org.apache.curator.framework.recipes.cache.PathChildrenCache.StartMode;
 import com.alibaba.fastjson.JSON;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.zookeeper.CreateMode;
 
 public class ManageServer {
 
     private String serversPath;
     private String commandPath;
     private String configPath;
-    private ZkClient zkClient;
+    private CuratorFramework client;
     private ServerConfig config;
-    private IZkChildListener childListener;
-    private IZkDataListener dataListener;
+    private PathChildrenCacheListener childListener;
+    private NodeCacheListener dataListener;
     private List<String> workServerList;
+    private NodeCache cache;
+    private PathChildrenCache childCache;
 
-    public ManageServer(String serversPath, String commandPath,
-                        String configPath, ZkClient zkClient, ServerConfig config) {
+    public ManageServer(final String serversPath, String commandPath,
+                        String configPath, CuratorFramework client, ServerConfig config) {
         this.serversPath = serversPath;
         this.commandPath = commandPath;
-        this.zkClient = zkClient;
+        this.client = client;
         this.config = config;
         this.configPath = configPath;
-        this.childListener = new IZkChildListener() {
 
-            public void handleChildChange(String parentPath,
-                                          List<String> currentChilds) throws Exception {
-                workServerList = currentChilds;
+    }
 
+    private void initRunning() {
+        this.client.start();
+
+        this.childCache = new PathChildrenCache(client, serversPath, true);
+        try {
+            childCache.start(StartMode.POST_INITIALIZED_EVENT);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        this.childListener = new PathChildrenCacheListener() {
+            public void childEvent(CuratorFramework client,
+                                   PathChildrenCacheEvent event) throws Exception {
+                workServerList = client.getChildren().forPath(serversPath);
                 System.out.println("work server list changed, new list is ");
                 execList();
             }
         };
-        this.dataListener = new IZkDataListener() {
-            public void handleDataDeleted(String dataPath) throws Exception {
-                // ignore;
-            }
+        this.childCache.getListenable().addListener(childListener);
 
-            public void handleDataChange(String dataPath, Object data)
-                    throws Exception {
-                String cmd = new String((byte[]) data);
+        this.cache = new NodeCache(client,commandPath,false);
+
+        this.dataListener = new NodeCacheListener() {
+            @Override
+            public void nodeChanged() throws Exception {
+                String cmd = new String(cache.getCurrentData().getData());
                 System.out.println("cmd:" + cmd);
                 exeCmd(cmd);
             }
         };
-    }
+        this.cache.getListenable().addListener(dataListener);
+        try {
+            cache.start();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-    private void initRunning() {
-        zkClient.subscribeDataChanges(commandPath, dataListener);
-        zkClient.subscribeChildChanges(serversPath, childListener);
     }
 
     /*
@@ -78,28 +89,29 @@ public class ManageServer {
     }
 
     private void execCreate() {
-        if (!zkClient.exists(configPath)) {
             try {
-                zkClient.createPersistent(configPath, JSON.toJSONString(config)
-                        .getBytes());
-            } catch (ZkNodeExistsException e) {
-                zkClient.writeData(configPath, JSON.toJSONString(config)
-                        .getBytes());
-            } catch (ZkNoNodeException e) {
-                String parentDir = configPath.substring(0,
-                        configPath.lastIndexOf('/'));
-                zkClient.createPersistent(parentDir, true);
+                if (client.checkExists().forPath(configPath) == null) {
+                    client.create().withMode(CreateMode.PERSISTENT).forPath(configPath, JSON.toJSONString(config).getBytes());
+                    client.setData().forPath(configPath, JSON.toJSONString(config).getBytes());
+                }
+            } catch (Exception e) {
+                String parentDir = configPath.substring(0, configPath.lastIndexOf('/'));
+                try {
+                    client.create().withMode(CreateMode.PERSISTENT).forPath(parentDir);
+                } catch (Exception e1) {
+                    e1.printStackTrace();
+                }
                 execCreate();
             }
-        }
+
     }
 
     private void execModify() {
         config.setDbUser(config.getDbUser() + "_modify");
 
         try {
-            zkClient.writeData(configPath, JSON.toJSONString(config).getBytes());
-        } catch (ZkNoNodeException e) {
+            client.setData().forPath(configPath, JSON.toJSONString(config).getBytes());
+        } catch (Exception e) {
             execCreate();
         }
     }
@@ -109,7 +121,7 @@ public class ManageServer {
     }
 
     public void stop() {
-        zkClient.unsubscribeChildChanges(serversPath, childListener);
-        zkClient.unsubscribeDataChanges(commandPath, dataListener);
+        cache.getListenable().removeListener(dataListener);
+        childCache.getListenable().removeListener(childListener);
     }
 }

@@ -1,65 +1,69 @@
 package xyx.tuny.subscribe;
 
-import org.I0Itec.zkclient.IZkDataListener;
-import org.I0Itec.zkclient.ZkClient;
-import org.I0Itec.zkclient.exception.ZkNoNodeException;
-
 import com.alibaba.fastjson.JSON;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.recipes.cache.NodeCache;
+import org.apache.curator.framework.recipes.cache.NodeCacheListener;
+import org.apache.zookeeper.CreateMode;
 
 public class WorkServer {
 
-    private ZkClient zkClient;
+    private CuratorFramework client;
     private String configPath;
     private String serversPath;
     private ServerData serverData;
     private ServerConfig serverConfig;
-    private IZkDataListener dataListener;
+    private NodeCacheListener dataListener;
+    private NodeCache cache;
 
-    public WorkServer(String configPath, String serversPath, ServerData serverData, ZkClient zkClient, ServerConfig initConfig) {
-        this.zkClient = zkClient;
+    public WorkServer(String configPath, String serversPath, ServerData serverData, CuratorFramework client, ServerConfig initConfig) {
+        this.client = client;
         this.configPath = configPath;
         this.serversPath = serversPath;
         this.serverData = serverData;
         this.serverConfig = initConfig;
-        this.dataListener = new IZkDataListener() {
-            public void handleDataDeleted(String dataPath) throws Exception {
 
-            }
-
-            public void handleDataChange(String dataPath, Object data)
-                    throws Exception {
-                String retJson = new String((byte[]) data);
+        this.cache = new NodeCache(client,configPath,false);
+        this.dataListener = new NodeCacheListener() {
+            @Override
+            public void nodeChanged() throws Exception {
+                String retJson = new String(cache.getCurrentData().getData());
                 ServerConfig serverConfigLocal = (ServerConfig) JSON.parseObject(retJson, ServerConfig.class);
                 updateConfig(serverConfigLocal);
                 System.out.println("new Work server config is:" + serverConfig.toString());
             }
         };
+
+
     }
 
     public void start() {
         System.out.println("work server start...");
+        client.start();
         initRunning();
     }
 
     public void stop() {
         System.out.println("work server stop...");
-        zkClient.unsubscribeDataChanges(configPath, dataListener);
+        cache.getListenable().removeListener(dataListener);
     }
 
     private void initRunning() {
         registMe();
-        zkClient.subscribeDataChanges(configPath, dataListener);
+        cache.getListenable().addListener(dataListener);
     }
 
     private void registMe() {
         String mePath = serversPath.concat("/").concat(serverData.getAddress());
         System.out.println("registe workserver:" + mePath);
         try {
-            zkClient.createEphemeral(mePath, JSON.toJSONString(serverData)
-                    .getBytes());
-        } catch (ZkNoNodeException e) {
-            zkClient.createPersistent(serversPath, true);
-            registMe();
+            client.create().withMode(CreateMode.PERSISTENT).forPath(mePath,JSON.toJSONString(serverData).getBytes());
+        } catch (Exception e) {
+            try {
+                client.create().withMode(CreateMode.PERSISTENT).forPath(serversPath);
+            } catch (Exception e1) {
+                e1.printStackTrace();
+            }
         }
     }
 

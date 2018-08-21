@@ -5,10 +5,11 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.I0Itec.zkclient.ZkClient;
-import org.I0Itec.zkclient.serialize.BytesPushThroughSerializer;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.retry.ExponentialBackoffRetry;
 
-public class SubscribeZkClient {
+public class SubscribeClient {
 
     private static final int CLIENT_QTY = 5;
 
@@ -18,7 +19,7 @@ public class SubscribeZkClient {
 
     public static void main(String[] args) throws Exception {
 
-        List<ZkClient> clients = new ArrayList<ZkClient>();
+        List<CuratorFramework> clients = new ArrayList<CuratorFramework>();
         List<WorkServer> workServers = new ArrayList<WorkServer>();
         ManageServer manageServer = null;
 
@@ -27,13 +28,20 @@ public class SubscribeZkClient {
             initConfig.setDbPwd("123456");
             initConfig.setDbUrl("jdbc:mysql://localhost:3306/mydb");
             initConfig.setDbUser("root");
-
-            ZkClient clientManage = new ZkClient("127.0.0.1", 5000, 5000, new BytesPushThroughSerializer());
+            CuratorFramework clientManage = CuratorFrameworkFactory.builder()
+                    .connectString("127.0.0.1:2181")
+                    .retryPolicy(new ExponentialBackoffRetry(1000, 3))
+                    .sessionTimeoutMs(5000)
+                    .build();
             manageServer = new ManageServer(SERVERS_PATH, COMMAND_PATH, CONFIG_PATH, clientManage, initConfig);
             manageServer.start();
 
             for (int i = 0; i < CLIENT_QTY; ++i) {
-                ZkClient client = new ZkClient("127.0.0.1", 5000, 5000, new BytesPushThroughSerializer());
+                CuratorFramework client = CuratorFrameworkFactory.builder()
+                        .connectString("127.0.0.1:2181")
+                        .retryPolicy(new ExponentialBackoffRetry(1000, 3))
+                        .sessionTimeoutMs(5000)
+                        .build();
                 clients.add(client);
                 ServerData serverData = new ServerData();
                 serverData.setId(i);
@@ -57,7 +65,7 @@ public class SubscribeZkClient {
                     e.printStackTrace();
                 }
             }
-            for (ZkClient client : clients) {
+            for (CuratorFramework client : clients) {
                 try {
                     client.close();
                 } catch (Exception e) {

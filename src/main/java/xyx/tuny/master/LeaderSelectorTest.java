@@ -12,11 +12,10 @@ import java.util.List;
 /**
  * master选举
  */
-public class LeaderSelectorZkClient {
+public class LeaderSelectorTest {
 
     //启动的服务个数
     private static final int  CLIENT_QTY = 10;
-
 
     public static void main(String[] args) throws Exception{
 
@@ -25,7 +24,7 @@ public class LeaderSelectorZkClient {
 
         try{
             for ( int i = 0; i < CLIENT_QTY; ++i ){
-                //创建zkClient
+                //创建client
                 CuratorFramework client = CuratorFrameworkFactory.builder()
                         .connectString("127.0.0.1:2181")
                         .retryPolicy(new ExponentialBackoffRetry(1000, 3))

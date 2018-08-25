@@ -3,11 +3,11 @@ package xyx.tuny.master;
 import com.alibaba.fastjson.JSON;
 import org.I0Itec.zkclient.exception.ZkInterruptedException;
 import org.I0Itec.zkclient.exception.ZkNoNodeException;
-import org.I0Itec.zkclient.exception.ZkNodeExistsException;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.cache.NodeCache;
 import org.apache.curator.framework.recipes.cache.NodeCacheListener;
 import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.data.Stat;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,34 +36,39 @@ public class WorkServer {
     //延迟时间5s
     private int delayTime = 5;
 
-    public WorkServer(RunningData runningData){
+    public WorkServer(RunningData runningData) {
         this.serverData = runningData;
     }
 
     //启动
-    public void start() throws Exception{
-        if(running){
+    public void start() throws Exception {
+        if (running) {
             throw new Exception("server has startup....");
         }
         running = true;
         client.start();
-        this.cache = new NodeCache(client,MASTER_PATH,false);
+        this.cache = new NodeCache(client, MASTER_PATH, false);
 
         this.dataListener = new NodeCacheListener() {
             @Override
             public void nodeChanged() throws Exception {
-                System.out.println("masterData:" + masterData.getName());
-                if(masterData != null && masterData.getName().equals(serverData.getName())){//若之前master为本机,则立即抢主,否则延迟5秒抢主(防止小故障引起的抢主可能导致的网络数据风暴)
-                    System.out.println("previous masterData is same as " + serverData.getName());
-                    takeMaster();
-                }else{
-                    delayExector.schedule(new Runnable() {
-                        @Override
-                        public void run() {
-                            takeMaster();
-                        }
-                    },delayTime, TimeUnit.SECONDS);
+                //System.out.println("--nodes changed and previous server is " + masterData.getName() + "--");
+                Stat stat = client.checkExists().forPath(MASTER_PATH);
+                if(null == stat){
+                    //takeMaster();
+                    if (masterData != null && masterData.getName().equals(serverData.getName())) {//若之前master为本机,则立即抢主,否则延迟5秒抢主(防止小故障引起的抢主可能导致的网络数据风暴)
+                        System.out.println("--now server " + serverData.getName() + " has privilege to take master");
+                        takeMaster();
+                    } else {
+                        delayExector.schedule(new Runnable() {
+                            @Override
+                            public void run() {
+                                takeMaster();
+                            }
+                        }, delayTime, TimeUnit.SECONDS);
+                    }
                 }
+
             }
         };
         this.cache.getListenable().addListener(dataListener);
@@ -76,8 +81,8 @@ public class WorkServer {
     }
 
     //停止
-    public void stop() throws Exception{
-        if(!running){
+    public void stop() throws Exception {
+        if (!running) {
             throw new Exception("server has stopped.....");
         }
         running = false;
@@ -87,44 +92,41 @@ public class WorkServer {
     }
 
     //抢注主节点
-    private void takeMaster(){
-        if(!running) return ;
-
+    private void takeMaster() {
+        if (!running) return;
         try {
             client.create().withMode(CreateMode.PERSISTENT).forPath(MASTER_PATH, JSON.toJSONString(serverData).getBytes());
             masterData = serverData;
-            System.out.println(serverData.getName()+" is master");
-
+            System.out.println("--" + serverData.getName() + " now is Master--");
             delayExector.schedule(new Runnable() {//测试抢主用,每5s释放一次主节点
                 @Override
                 public void run() {
-                    if(checkMaster()){
+                    if (checkMaster()) {
                         releaseMaster();
                     }
                 }
-            },5,TimeUnit.SECONDS);
-        }catch (ZkNodeExistsException e){//节点已存在
-            System.out.println("node exists");
-            String retJson = new String(cache.getCurrentData().getData());
-            RunningData runningData = null;
+            }, 5, TimeUnit.SECONDS);
+        } catch (Exception e){//节点已存在
+            String retJson = null;
             try {
+                retJson = new String(client.getData().forPath(MASTER_PATH));
+                RunningData runningData = null;
                 runningData = (RunningData)JSON.parseObject(retJson, RunningData.class);
+                if(runningData == null){//读取主节点时,主节点被释放
+                    takeMaster();
+                }else{
+                    masterData = runningData;
+                }
             } catch (Exception e1) {
-                e1.printStackTrace();
+
             }
-            if(runningData == null){//读取主节点时,主节点被释放
-                takeMaster();
-            }else{
-                masterData = runningData;
-            }
-        } catch (Exception e) {
-            // ignore;
         }
 
     }
+
     //释放主节点
-    private void releaseMaster(){
-        if(checkMaster()){
+    private void releaseMaster() {
+        if (checkMaster()) {
             try {
                 client.delete().forPath(MASTER_PATH);
             } catch (Exception e) {
@@ -134,21 +136,21 @@ public class WorkServer {
     }
 
     //检验自己是否是主节点
-    private boolean checkMaster(){
+    private boolean checkMaster() {
         try {
             String retJson = new String(cache.getCurrentData().getData());
-            RunningData runningData = (RunningData)JSON.parseObject(retJson, RunningData.class);
+            RunningData runningData = (RunningData) JSON.parseObject(retJson, RunningData.class);
             masterData = runningData;
             if (masterData.getName().equals(serverData.getName())) {
                 return true;
             }
             return false;
 
-        }catch (ZkNoNodeException e){//节点不存在
-            return  false;
-        }catch (ZkInterruptedException e){//网络中断
+        } catch (ZkNoNodeException e) {//节点不存在
+            return false;
+        } catch (ZkInterruptedException e) {//网络中断
             return checkMaster();
-        }catch (Exception e){//其它
+        } catch (Exception e) {//其它
             return false;
         }
     }

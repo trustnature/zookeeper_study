@@ -15,8 +15,7 @@ public class Recipes_MasterSelect {
             .retryPolicy(new ExponentialBackoffRetry(1000, 3)).build();
     public static void main( String[] args ) throws Exception {
     	client.start();
-        LeaderSelector selector = new LeaderSelector(client, 
-        		master_path, 
+        LeaderSelector selector = new LeaderSelector(client, master_path,
         		new LeaderSelectorListenerAdapter() {
 		            public void takeLeadership(CuratorFramework client) throws Exception {
 		                System.out.println("成为Master角色");

@@ -2,9 +2,6 @@ package xyx.tuny.master;
 
 import java.io.Serializable;
 
-/**
- * Created by nevermore on 16/6/22.
- */
 public class RunningData implements Serializable {
 
     private static final long serialVersionUID = 4260577459043203630L;

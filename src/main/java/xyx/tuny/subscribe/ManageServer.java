@@ -42,9 +42,18 @@ public class ManageServer {
         this.childListener = new PathChildrenCacheListener() {
             public void childEvent(CuratorFramework client,
                                    PathChildrenCacheEvent event) throws Exception {
-                workServerList = client.getChildren().forPath(serversPath);
-                System.out.println("work server list changed, new list is ");
-                execList();
+                switch(event.getType()){
+                    case CHILD_ADDED:
+                        workServerList = client.getChildren().forPath(serversPath);
+                        System.out.println("work server list changed add, new list is ");
+                        execList();
+                        break;
+                    case CHILD_REMOVED:
+                        workServerList = client.getChildren().forPath(serversPath);
+                        System.out.println("work server list changed remove, new list is ");
+                        execList();
+                        break;
+                }
             }
         };
         this.childCache.getListenable().addListener(childListener);

@@ -55,7 +55,7 @@ public class WorkServer {
 
     private void registMe() {
         String mePath = serversPath.concat("/").concat(serverData.getAddress());
-        System.out.println("registe workserver:" + mePath);
+        //System.out.println("registe workserver:" + mePath);
         try {
             client.create().withMode(CreateMode.PERSISTENT).forPath(mePath,JSON.toJSONString(serverData).getBytes());
         } catch (Exception e) {
